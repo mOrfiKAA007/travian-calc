@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Travian Oázis Farm Kalkulátor (Online)</title>
+    
+    <!-- Firebase SDK betöltése -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-database-compat.js"></script>
+
+    <style>
+        body { font-family: Arial, sans-serif; background-color: #f4f1ea; color: #333; margin: 0; padding: 15px; }
+        .container { max-width: 900px; margin: 0 auto; background: #fff; padding: 15px 20px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
+        h1, h2 { color: #4a3828; border-bottom: 2px solid #7a6148; padding-bottom: 5px; font-size: 20px; }
+        
+        /* Fülek stílusa */
+        .tabs { display: flex; flex-wrap: gap: 5px; margin-bottom: 15px; border-bottom: 2px solid #7a6148; padding-bottom: 8px; }
+        .tab-btn { background-color: #dcd6cd; border: none; padding: 8px 14px; cursor: pointer; font-weight: bold; border-radius: 4px 4px 0 0; color: #4a3828; font-size: 14px; transition: background-color 0.2s; }
+        .tab-btn:hover { background-color: #c8beaf; }
+        .tab-btn.active { background-color: #7a6148; color: white; }
+
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+
+        .section { margin-bottom: 20px; }
+        label { font-weight: bold; display: inline-block; margin-bottom: 5px; }
+        input[type="number"], select, textarea { padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; box-sizing: border-box; }
+        .inline-inputs { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+        .coord-input { width: 60px; }
+        textarea { width: 100%; height: 160px; font-family: monospace; resize: vertical; }
+        button.calc-btn { background-color: #5b7e28; color: white; padding: 12px 20px; border: none; border-radius: 4px; font-size: 16px; cursor: pointer; font-weight: bold; width: 100%; }
+        button.calc-btn:hover { background-color: #48641f; }
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 13px; }
+        th, td { border: 1px solid #ddd; padding: 6px 8px; text-align: center; }
+        th { background-color: #7a6148; color: white; }
+        tr:nth-child(even) { background-color: #f9f9f9; }
+        .summary-box { background-color: #e8f0d8; border: 1px solid #b2d281; padding: 12px; border-radius: 5px; margin-top: 15px; font-size: 15px; }
+        .help-text { font-size: 12px; color: #666; margin-top: 4px; }
+        #syncStatus { font-size: 11px; color: #666; float: right; margin-top: 5px; }
+    </style>
+</head>
+<body onload="initApp()">
+
+<div class="container">
+    <h1>Travian Oázis Farm Kalkulátor - by mOrfi <span id="syncStatus">Kapcsolódás...</span></h1>
+    
+    <!-- Fülek gombjai -->
+    <div class="tabs" id="tabButtons">
+        <button class="tab-btn active" onclick="switchTab(0)">1. Falu</button>
+        <button class="tab-btn" onclick="switchTab(1)">2. Falu</button>
+        <button class="tab-btn" onclick="switchTab(2)">3. Falu</button>
+        <button class="tab-btn" onclick="switchTab(3)">4. Falu</button>
+        <button class="tab-btn" onclick="switchTab(4)">5. Falu</button>
+        <button class="tab-btn" onclick="switchTab(5)">6. Falu</button>
+        <button class="tab-btn" onclick="switchTab(6)">7. Falu</button>
+    </div>
+
+    <!-- A 7 falu konténere -->
+    <div id="tabContentsContainer"></div>
+</div>
+
+<script>
+    // --- IDE ÍRD BE A SAJÁT FIREBASE ADATAIDAT ---
+    const firebaseConfig = {
+        apiKey: "AIzaSyCsGGSJjxGEkn6Ciid3S9378bifnvmwzGU",
+        authDomain: "travian-farm-calc.firebaseapp.com",
+        databaseURL: "https://travian-farm-calc-default-rtdb.europe-west1.firebasedatabase.app/",
+        projectId: "travian-farm-calc",
+        storageBucket: "travian-farm-calc.firebasestorage.app",
+        messagingSenderId: "194959845188",
+        appId: "G-6167TT4H7S"
+    };
+
+    // Firebase inicializálás
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+    const dbRef = db.ref('travianData');
+
+    const totalTabs = 7;
+    let isRemoteUpdate = false; // Végtelen hurok elkerülésére mentés közben
+
+    function initApp() {
+        const container = document.getElementById('tabContentsContainer');
+        container.innerHTML = '';
+
+        for (let i = 0; i < totalTabs; i++) {
+            const tabDiv = document.createElement('div');
+            tabDiv.className = `tab-content ${i === 0 ? 'active' : ''}`;
+            tabDiv.id = `tabContent_${i}`;
+            
+            tabDiv.innerHTML = `
+                <div class="section">
+                    <h2>1. Alapbeállítások</h2>
+                    <div class="inline-inputs">
+                        <div>
+                            <label>Start (X|Y):</label><br>
+                            <input type="number" id="startX_${i}" class="coord-input" value="0" oninput="saveData()">
+                            <input type="number" id="startY_${i}" class="coord-input" value="0" oninput="saveData()">
+                        </div>
+                        <div>
+                            <label for="unitSpeed_${i}">Egység:</label><br>
+                            <select id="unitSpeed_${i}" onchange="toggleCustomSpeed(${i}); saveData();">
+                                <option value="16" selected>Hun - Sztyeppei (16 m/ó)</option>
+                                <option value="19">Gall - Villám (19 m/ó)</option>
+                                <option value="16">Germán - Gergelyi (16 m/ó)</option>
+                                <option value="14">Római - EI (14 m/ó)</option>
+                                <option value="13">Római - EC (13 m/ó)</option>
+                                <option value="13.5">Gall - Hedui (13.5 m/ó)</option>
+                                <option value="custom">Egyedi...</option>
+                            </select>
+                            <input type="number" id="customSpeed_${i}" style="display:none; width: 60px;" placeholder="m/h" step="0.5" oninput="saveData()">
+                        </div>
+                        <div>
+                            <label for="interval_${i}">Indítás (perc):</label><br>
+                            <input type="number" id="interval_${i}" value="6" min="1" style="width: 70px;" oninput="saveData()">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="section">
+                    <h2>2. Cél oázisok (max 100 db)</h2>
+                    <p class="help-text">Soronként egy koordináta, pl: <b>12|-34</b></p>
+                    <textarea id="targetCoords_${i}" placeholder="12|-34&#10;15|-30&#10;-5|20" oninput="saveData()"></textarea>
+                </div>
+
+                <button class="calc-btn" onclick="calculate(${i})">Számítás indítása</button>
+
+                <div class="section" id="resultsSection_${i}" style="display:none;">
+                    <h2>3. Eredmények</h2>
+                    <div class="summary-box" id="summary_${i}"></div>
+                    <div style="overflow-x:auto;">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>Cél</th>
+                                    <th>Táv (mező)</th>
+                                    <th>Oda-vissza idő</th>
+                                    <th>Ló (db)</th>
+                                </tr>
+                            </thead>
+                            <tbody id="resultsTableBody_${i}"></tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+            container.appendChild(tabDiv);
+        }
+
+        // Valós idejű figyelő beállítása a Firebase-ről
+        dbRef.on('value', (snapshot) => {
+            const data = snapshot.val();
+            if (data) {
+                isRemoteUpdate = true;
+                updateFieldsFromData(data);
+                isRemoteUpdate = false;
+                document.getElementById('syncStatus').innerText = '🟢 Szinkronizálva';
+            } else {
+                document.getElementById('syncStatus').innerText = '⚪ Nincs még adat';
+            }
+        }, (error) => {
+            document.getElementById('syncStatus').innerText = '🔴 Hiba a kapcsolatban';
+            console.error(error);
+        });
+    }
+
+    function switchTab(index) {
+        const buttons = document.querySelectorAll('.tab-btn');
+        buttons.forEach((btn, idx) => {
+            btn.classList.toggle('active', idx === index);
+        });
+
+        const contents = document.querySelectorAll('.tab-content');
+        contents.forEach((content, idx) => {
+            content.classList.toggle('active', idx === index);
+        });
+    }
+
+    function toggleCustomSpeed(i) {
+        const select = document.getElementById(`unitSpeed_${i}`);
+        const customInput = document.getElementById(`customSpeed_${i}`);
+        if(customInput && select) {
+            customInput.style.display = (select.value === 'custom') ? 'inline-block' : 'none';
+        }
+    }
+
+    // Adatok mentése Firebase-be gépelés közben
+    function saveData() {
+        if (isRemoteUpdate) return; // Ha a frissítés távolról jön, ne mentse vissza azonnal végtelen ciklusban
+
+        const allData = [];
+        for (let i = 0; i < totalTabs; i++) {
+            allData.push({
+                startX: document.getElementById(`startX_${i}`).value,
+                startY: document.getElementById(`startY_${i}`).value,
+                unitSpeed: document.getElementById(`unitSpeed_${i}`).value,
+                customSpeed: document.getElementById(`customSpeed_${i}`).value,
+                interval: document.getElementById(`interval_${i}`).value,
+                targetCoords: document.getElementById(`targetCoords_${i}`).value
+            });
+        }
+        
+        dbRef.set(allData).then(() => {
+            document.getElementById('syncStatus').innerText = '🟢 Mentve';
+        }).catch((error) => {
+            document.getElementById('syncStatus').innerText = '🔴 Mentési hiba';
+        });
+    }
+
+    // Mezők kitöltése a Firebase-ből érkező adatok alapján
+    function updateFieldsFromData(allData) {
+        allData.forEach((data, i) => {
+            if (document.getElementById(`startX_${i}`)) {
+                if (data.startX !== undefined) document.getElementById(`startX_${i}`).value = data.startX;
+                if (data.startY !== undefined) document.getElementById(`startY_${i}`).value = data.startY;
+                if (data.unitSpeed !== undefined) document.getElementById(`unitSpeed_${i}`).value = data.unitSpeed;
+                if (data.customSpeed !== undefined) document.getElementById(`customSpeed_${i}`).value = data.customSpeed;
+                if (data.interval !== undefined) document.getElementById(`interval_${i}`).value = data.interval;
+                if (data.targetCoords !== undefined) document.getElementById(`targetCoords_${i}`).value = data.targetCoords;
+                
+                toggleCustomSpeed(i);
+            }
+        });
+    }
+
+    function calculate(i) {
+        const startX = parseFloat(document.getElementById(`startX_${i}`).value) || 0;
+        const startY = parseFloat(document.getElementById(`startY_${i}`).value) || 0;
+        const speedSelect = document.getElementById(`unitSpeed_${i}`);
+        let speed = (speedSelect.value === 'custom') ? parseFloat(document.getElementById(`customSpeed_${i}`).value) || 0 : parseFloat(speedSelect.value);
+        const intervalMin = parseFloat(document.getElementById(`interval_${i}`).value) || 1;
+
+        if (speed <= 0) { alert('Kérlek adj meg egy érvényes sebességet!'); return; }
+
+        const rawText = document.getElementById(`targetCoords_${i}`).value;
+        const lines = rawText.split('\n');
+        const targets = [];
+        const coordRegex = /(-?\d+)[\s|,|\/]+(-?\d+)/;
+
+        for (let line of lines) {
+            line = line.trim();
+            if (!line) continue;
+            const match = line.match(coordRegex);
+            if (match) {
+                targets.push({ x: parseFloat(match[1]), y: parseFloat(match[2]) });
+            }
+            if (targets.length >= 100) break;
+        }
+
+        if (targets.length === 0) { alert('Nem található érvényes koordináta ezen a fülön!'); return; }
+
+        const tbody = document.getElementById(`resultsTableBody_${i}`);
+        tbody.innerHTML = '';
+        let totalHorsesNeeded = 0;
+
+        targets.forEach((target, index) => {
+            const dx = startX - target.x;
+            const dy = startY - target.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            const travelTimeHours = distance / speed;
+            const travelTimeMinutes = travelTimeHours * 60;
+            const roundTripMinutes = travelTimeMinutes * 2;
+            const horsesNeeded = Math.ceil(roundTripMinutes / intervalMin);
+            totalHorsesNeeded += horsesNeeded;
+
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td>${index + 1}</td>
+                <td>(${target.x}|${target.y})</td>
+                <td>${distance.toFixed(2)}</td>
+                <td>${formatTime(roundTripMinutes)}</td>
+                <td><b>${horsesNeeded}</b></td>
+            `;
+            tbody.appendChild(row);
+        });
+
+        document.getElementById(`summary_${i}`).innerHTML = `
+            <strong>Összes célpont:</strong> ${targets.length} db<br>
+            <strong>Szükséges ló a lefedéshez:</strong> <b style="color: #5b7e28; font-size: 18px;">${totalHorsesNeeded} db</b>
+        `;
+        document.getElementById(`resultsSection_${i}`).style.display = 'block';
+    }
+
+    function formatTime(totalMinutes) {
+        const totalSeconds = Math.round(totalMinutes * 60);
+        const hours = Math.floor(totalSeconds / 3600);
+        const minutes = Math.floor((totalSeconds % 3600) / 60);
+        const seconds = totalSeconds % 60;
+        let result = '';
+        if (hours > 0) result += hours + 'ó ';
+        result += minutes + 'p ' + seconds + 'mp';
+        return result;
+    }
+</script>
+
+</body>
+</html>
