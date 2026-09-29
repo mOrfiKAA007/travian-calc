@@ -85,6 +85,7 @@
 
     const totalTabs = 7;
     let isRemoteUpdate = false; 
+    let globalAppData = []; // Itt tároljuk a betöltött adatokat (beleértve a pipákat is)
 
     // Sebességek konstansai
     const SPEEDS = {
@@ -124,7 +125,7 @@
                     <textarea id="targetCoords_${i}" placeholder="12|-34&#10;15|-30&#10;-5|20" oninput="saveData()"></textarea>
                 </div>
 
-                <button class="calc-btn" onclick="calculate(${i})">Számítás indítása</button>
+                <button class="calc-btn" onclick="calculate(${i})">Számítás és Táblázat frissítése</button>
 
                 <div class="section" id="resultsSection_${i}" style="display:none;">
                     <h2>3. Eredmények (Egységek kiválasztása oázisonként)</h2>
@@ -154,6 +155,7 @@
             const data = snapshot.val();
             if (data) {
                 isRemoteUpdate = true;
+                globalAppData = data;
                 updateFieldsFromData(data);
                 isRemoteUpdate = false;
                 document.getElementById('syncStatus').innerText = '🟢 Szinkronizálva';
@@ -178,20 +180,25 @@
         });
     }
 
-    // Adatok mentése Firebase-be gépelés közben
+    // Adatok mentése Firebase-be gépelés vagy pipa változás közben
     function saveData() {
         if (isRemoteUpdate) return; 
 
         const allData = [];
         for (let i = 0; i < totalTabs; i++) {
+            // Meglévő mentett pipák összegyűjtése ehhez a fülhöz, ha léteznek
+            let unitsConfig = (globalAppData[i] && globalAppData[i].unitsConfig) ? globalAppData[i].unitsConfig : {};
+
             allData.push({
                 startX: document.getElementById(`startX_${i}`).value,
                 startY: document.getElementById(`startY_${i}`).value,
                 interval: document.getElementById(`interval_${i}`).value,
-                targetCoords: document.getElementById(`targetCoords_${i}`).value
+                targetCoords: document.getElementById(`targetCoords_${i}`).value,
+                unitsConfig: unitsConfig
             });
         }
         
+        globalAppData = allData;
         dbRef.set(allData).then(() => {
             document.getElementById('syncStatus').innerText = '🟢 Mentve';
         }).catch((error) => {
@@ -207,6 +214,12 @@
                 if (data.startY !== undefined) document.getElementById(`startY_${i}`).value = data.startY;
                 if (data.interval !== undefined) document.getElementById(`interval_${i}`).value = data.interval;
                 if (data.targetCoords !== undefined) document.getElementById(`targetCoords_${i}`).value = data.targetCoords;
+                
+                // Ha már volt nyitva eredmény táblázat ezen a fülön, frissítsük automatikusan
+                const resultsSection = document.getElementById(`resultsSection_${i}`);
+                if (resultsSection && resultsSection.style.display !== 'none') {
+                    calculate(i);
+                }
             }
         });
     }
@@ -233,6 +246,9 @@
 
         if (targets.length === 0) { alert('Nem található érvényes koordináta ezen a fülön!'); return; }
 
+        // Előző mentett pipák lekérése a Firebase adatból
+        let savedUnitsConfig = (globalAppData[i] && globalAppData[i].unitsConfig) ? globalAppData[i].unitsConfig : {};
+
         const tbody = document.getElementById(`resultsTableBody_${i}`);
         tbody.innerHTML = '';
 
@@ -241,17 +257,32 @@
             const dy = startY - target.y;
             const distance = Math.sqrt(dx * dx + dy * dy);
 
+            // Kulcs az oázishoz (pl "41|-2")
+            const coordKey = `${target.x}|${target.y}`;
+            
+            // Alapértelmezés: ha még nincsen mentve semmi ehhez a koordinátához, az első (Sztyeppe) legyen igaz, a többi hamis
+            let isSztyChecked = true;
+            let isMestChecked = false;
+            let isMartChecked = false;
+
+            if (savedUnitsConfig[coordKey] !== undefined) {
+                isSztyChecked = !!savedUnitsConfig[coordKey].szty;
+                isMestChecked = !!savedUnitsConfig[coordKey].mest;
+                isMartChecked = !!savedUnitsConfig[coordKey].mart;
+            }
+
             const row = document.createElement('tr');
             row.id = `row_${i}_${index}`;
+            row.dataset.coordKey = coordKey;
             row.innerHTML = `
                 <td>${index + 1}</td>
                 <td>(${target.x}|${target.y})</td>
                 <td id="dist_${i}_${index}">${distance.toFixed(2)}</td>
                 <td>
                     <div class="unit-checkboxes-row">
-                        <label><input type="checkbox" id="szty_${i}_${index}" checked onchange="updateRowCalculation(${i}, ${index}, ${distance})"> Sztyeppe</label>
-                        <label><input type="checkbox" id="mest_${i}_${index}" onchange="updateRowCalculation(${i}, ${index}, ${distance})"> Mesterlövész</label>
-                        <label><input type="checkbox" id="mart_${i}_${index}" onchange="updateRowCalculation(${i}, ${index}, ${distance})"> Martalóc</label>
+                        <label><input type="checkbox" id="szty_${i}_${index}" ${isSztyChecked ? 'checked' : ''} onchange="onCheckboxChange(${i}, ${index}, ${distance})"> Sztyeppe</label>
+                        <label><input type="checkbox" id="mest_${i}_${index}" ${isMestChecked ? 'checked' : ''} onchange="onCheckboxChange(${i}, ${index}, ${distance})"> Mesterlövész</label>
+                        <label><input type="checkbox" id="mart_${i}_${index}" ${isMartChecked ? 'checked' : ''} onchange="onCheckboxChange(${i}, ${index}, ${distance})"> Martalóc</label>
                     </div>
                 </td>
                 <td id="time_${i}_${index}">-</td>
@@ -259,21 +290,37 @@
             `;
             tbody.appendChild(row);
             
-            // Kezdeti számítás az alapból bepipált sztyeppére
-            updateRowCalculation(i, index, distance);
+            updateRowCalculation(i, index, distance, false);
         });
 
         document.getElementById(`resultsSection_${i}`).style.display = 'block';
         updateTotalSummary(i, targets.length);
     }
 
-    function updateRowCalculation(tabIdx, rowIdx, distance) {
+    function onCheckboxChange(tabIdx, rowIdx, distance) {
+        // Amikor a felhasználó pipál, azonnal frissítjük a sor számítását és mentjük a Firebase-be is
+        updateRowCalculation(tabIdx, rowIdx, distance, true);
+    }
+
+    function updateRowCalculation(tabIdx, rowIdx, distance, shouldSave) {
+        const row = document.getElementById(`row_${tabIdx}_${rowIdx}`);
+        const coordKey = row.dataset.coordKey;
+
         const useSzty = document.getElementById(`szty_${tabIdx}_${rowIdx}`).checked;
         const useMest = document.getElementById(`mest_${tabIdx}_${rowIdx}`).checked;
         const useMart = document.getElementById(`mart_${tabIdx}_${rowIdx}`).checked;
 
         const timeCell = document.getElementById(`time_${tabIdx}_${rowIdx}`);
         const horsesCell = document.getElementById(`horses_${tabIdx}_${rowIdx}`);
+
+        // Mentés frissítése a memóriában és Firebase-ben
+        if (!globalAppData[tabIdx]) globalAppData[tabIdx] = {};
+        if (!globalAppData[tabIdx].unitsConfig) globalAppData[tabIdx].unitsConfig = {};
+        globalAppData[tabIdx].unitsConfig[coordKey] = { szty: useSzty, mest: useMest, mart: useMart };
+
+        if (shouldSave) {
+            saveData();
+        }
 
         if (!useSzty && !useMest && !useMart) {
             timeCell.innerText = 'Válassz egységet!';
@@ -282,7 +329,6 @@
             return;
         }
 
-        // Kiválasztott egységek sebességei közül a leglassabb meghatározása
         let activeSpeeds = [];
         if (useSzty) activeSpeeds.push(SPEEDS.sztyeppe);
         if (useMest) activeSpeeds.push(SPEEDS.mesterlovesz);
@@ -350,7 +396,7 @@
         if (totalSzty === 0 && totalMest === 0 && totalMart === 0) summaryHtml += `<span style="color:red;">Nincs aktív egység kiválasztva.</span>`;
 
         const summaryBox = document.getElementById(`summary_${tabIdx}`);
-        if (summaryBox) summaryBox.innerHTML = summaryHtml;
+        if (summaryBox) summaryBox.html = summaryBox.innerHTML = summaryHtml; // Javítva
     }
 
     function formatTime(totalMinutes) {
