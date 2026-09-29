@@ -11,11 +11,11 @@
 
     <style>
         body { font-family: Arial, sans-serif; background-color: #f4f1ea; color: #333; margin: 0; padding: 15px; }
-        .container { max-width: 900px; margin: 0 auto; background: #fff; padding: 15px 20px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
+        .container { max-width: 950px; margin: 0 auto; background: #fff; padding: 15px 20px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
         h1, h2 { color: #4a3828; border-bottom: 2px solid #7a6148; padding-bottom: 5px; font-size: 20px; }
         
         /* Fülek stílusa */
-        .tabs { display: flex; flex-wrap: gap: 5px; margin-bottom: 15px; border-bottom: 2px solid #7a6148; padding-bottom: 8px; }
+        .tabs { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 15px; border-bottom: 2px solid #7a6148; padding-bottom: 8px; }
         .tab-btn { background-color: #dcd6cd; border: none; padding: 8px 14px; cursor: pointer; font-weight: bold; border-radius: 4px 4px 0 0; color: #4a3828; font-size: 14px; transition: background-color 0.2s; }
         .tab-btn:hover { background-color: #c8beaf; }
         .tab-btn.active { background-color: #7a6148; color: white; }
@@ -25,16 +25,22 @@
 
         .section { margin-bottom: 20px; }
         label { font-weight: bold; display: inline-block; margin-bottom: 5px; }
-        input[type="number"], select, textarea { padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; box-sizing: border-box; }
-        .inline-inputs { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+        input[type="number"], textarea { padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; box-sizing: border-box; }
+        .inline-inputs { display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap; }
         .coord-input { width: 60px; }
-        textarea { width: 100%; height: 160px; font-family: monospace; resize: vertical; }
+
+        textarea { width: 100%; height: 130px; font-family: monospace; resize: vertical; }
         button.calc-btn { background-color: #5b7e28; color: white; padding: 12px 20px; border: none; border-radius: 4px; font-size: 16px; cursor: pointer; font-weight: bold; width: 100%; }
         button.calc-btn:hover { background-color: #48641f; }
+        
         table { width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 13px; }
-        th, td { border: 1px solid #ddd; padding: 6px 8px; text-align: center; }
+        th, td { border: 1px solid #ddd; padding: 6px 8px; text-align: center; vertical-align: middle; }
         th { background-color: #7a6148; color: white; }
         tr:nth-child(even) { background-color: #f9f9f9; }
+        
+        .unit-checkboxes-row { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; font-size: 12px; }
+        .unit-checkboxes-row label { font-weight: normal; cursor: pointer; display: flex; align-items: center; gap: 3px; }
+
         .summary-box { background-color: #e8f0d8; border: 1px solid #b2d281; padding: 12px; border-radius: 5px; margin-top: 15px; font-size: 15px; }
         .help-text { font-size: 12px; color: #666; margin-top: 4px; }
         #syncStatus { font-size: 11px; color: #666; float: right; margin-top: 5px; }
@@ -78,7 +84,14 @@
     const dbRef = db.ref('travianData');
 
     const totalTabs = 7;
-    let isRemoteUpdate = false; // Végtelen hurok elkerülésére mentés közben
+    let isRemoteUpdate = false; 
+
+    // Sebességek konstansai
+    const SPEEDS = {
+        sztyeppe: 16,
+        mesterlovesz: 15,
+        martaloc: 14
+    };
 
     function initApp() {
         const container = document.getElementById('tabContentsContainer');
@@ -99,19 +112,6 @@
                             <input type="number" id="startY_${i}" class="coord-input" value="0" oninput="saveData()">
                         </div>
                         <div>
-                            <label for="unitSpeed_${i}">Egység:</label><br>
-                            <select id="unitSpeed_${i}" onchange="toggleCustomSpeed(${i}); saveData();">
-                                <option value="16" selected>Hun - Sztyeppei (16 m/ó)</option>
-                                <option value="19">Gall - Villám (19 m/ó)</option>
-                                <option value="16">Germán - Gergelyi (16 m/ó)</option>
-                                <option value="14">Római - EI (14 m/ó)</option>
-                                <option value="13">Római - EC (13 m/ó)</option>
-                                <option value="13.5">Gall - Hedui (13.5 m/ó)</option>
-                                <option value="custom">Egyedi...</option>
-                            </select>
-                            <input type="number" id="customSpeed_${i}" style="display:none; width: 60px;" placeholder="m/h" step="0.5" oninput="saveData()">
-                        </div>
-                        <div>
                             <label for="interval_${i}">Indítás (perc):</label><br>
                             <input type="number" id="interval_${i}" value="6" min="1" style="width: 70px;" oninput="saveData()">
                         </div>
@@ -127,7 +127,7 @@
                 <button class="calc-btn" onclick="calculate(${i})">Számítás indítása</button>
 
                 <div class="section" id="resultsSection_${i}" style="display:none;">
-                    <h2>3. Eredmények</h2>
+                    <h2>3. Eredmények (Egységek kiválasztása oázisonként)</h2>
                     <div class="summary-box" id="summary_${i}"></div>
                     <div style="overflow-x:auto;">
                         <table>
@@ -136,8 +136,9 @@
                                     <th>#</th>
                                     <th>Cél</th>
                                     <th>Táv (mező)</th>
-                                    <th>Oda-vissza idő</th>
-                                    <th>Ló (db)</th>
+                                    <th>Küldött egységek (Pipáld ki)</th>
+                                    <th>Idő (oda-vissza)</th>
+                                    <th>Szükséges lóigény</th>
                                 </tr>
                             </thead>
                             <tbody id="resultsTableBody_${i}"></tbody>
@@ -177,25 +178,15 @@
         });
     }
 
-    function toggleCustomSpeed(i) {
-        const select = document.getElementById(`unitSpeed_${i}`);
-        const customInput = document.getElementById(`customSpeed_${i}`);
-        if(customInput && select) {
-            customInput.style.display = (select.value === 'custom') ? 'inline-block' : 'none';
-        }
-    }
-
     // Adatok mentése Firebase-be gépelés közben
     function saveData() {
-        if (isRemoteUpdate) return; // Ha a frissítés távolról jön, ne mentse vissza azonnal végtelen ciklusban
+        if (isRemoteUpdate) return; 
 
         const allData = [];
         for (let i = 0; i < totalTabs; i++) {
             allData.push({
                 startX: document.getElementById(`startX_${i}`).value,
                 startY: document.getElementById(`startY_${i}`).value,
-                unitSpeed: document.getElementById(`unitSpeed_${i}`).value,
-                customSpeed: document.getElementById(`customSpeed_${i}`).value,
                 interval: document.getElementById(`interval_${i}`).value,
                 targetCoords: document.getElementById(`targetCoords_${i}`).value
             });
@@ -214,12 +205,8 @@
             if (document.getElementById(`startX_${i}`)) {
                 if (data.startX !== undefined) document.getElementById(`startX_${i}`).value = data.startX;
                 if (data.startY !== undefined) document.getElementById(`startY_${i}`).value = data.startY;
-                if (data.unitSpeed !== undefined) document.getElementById(`unitSpeed_${i}`).value = data.unitSpeed;
-                if (data.customSpeed !== undefined) document.getElementById(`customSpeed_${i}`).value = data.customSpeed;
                 if (data.interval !== undefined) document.getElementById(`interval_${i}`).value = data.interval;
                 if (data.targetCoords !== undefined) document.getElementById(`targetCoords_${i}`).value = data.targetCoords;
-                
-                toggleCustomSpeed(i);
             }
         });
     }
@@ -227,11 +214,7 @@
     function calculate(i) {
         const startX = parseFloat(document.getElementById(`startX_${i}`).value) || 0;
         const startY = parseFloat(document.getElementById(`startY_${i}`).value) || 0;
-        const speedSelect = document.getElementById(`unitSpeed_${i}`);
-        let speed = (speedSelect.value === 'custom') ? parseFloat(document.getElementById(`customSpeed_${i}`).value) || 0 : parseFloat(speedSelect.value);
         const intervalMin = parseFloat(document.getElementById(`interval_${i}`).value) || 1;
-
-        if (speed <= 0) { alert('Kérlek adj meg egy érvényes sebességet!'); return; }
 
         const rawText = document.getElementById(`targetCoords_${i}`).value;
         const lines = rawText.split('\n');
@@ -252,34 +235,122 @@
 
         const tbody = document.getElementById(`resultsTableBody_${i}`);
         tbody.innerHTML = '';
-        let totalHorsesNeeded = 0;
 
         targets.forEach((target, index) => {
             const dx = startX - target.x;
             const dy = startY - target.y;
             const distance = Math.sqrt(dx * dx + dy * dy);
-            const travelTimeHours = distance / speed;
-            const travelTimeMinutes = travelTimeHours * 60;
-            const roundTripMinutes = travelTimeMinutes * 2;
-            const horsesNeeded = Math.ceil(roundTripMinutes / intervalMin);
-            totalHorsesNeeded += horsesNeeded;
 
             const row = document.createElement('tr');
+            row.id = `row_${i}_${index}`;
             row.innerHTML = `
                 <td>${index + 1}</td>
                 <td>(${target.x}|${target.y})</td>
-                <td>${distance.toFixed(2)}</td>
-                <td>${formatTime(roundTripMinutes)}</td>
-                <td><b>${horsesNeeded}</b></td>
+                <td id="dist_${i}_${index}">${distance.toFixed(2)}</td>
+                <td>
+                    <div class="unit-checkboxes-row">
+                        <label><input type="checkbox" id="szty_${i}_${index}" checked onchange="updateRowCalculation(${i}, ${index}, ${distance})"> Sztyeppe</label>
+                        <label><input type="checkbox" id="mest_${i}_${index}" onchange="updateRowCalculation(${i}, ${index}, ${distance})"> Mesterlövész</label>
+                        <label><input type="checkbox" id="mart_${i}_${index}" onchange="updateRowCalculation(${i}, ${index}, ${distance})"> Martalóc</label>
+                    </div>
+                </td>
+                <td id="time_${i}_${index}">-</td>
+                <td id="horses_${i}_${index}">-</td>
             `;
             tbody.appendChild(row);
+            
+            // Kezdeti számítás az alapból bepipált sztyeppére
+            updateRowCalculation(i, index, distance);
         });
 
-        document.getElementById(`summary_${i}`).innerHTML = `
-            <strong>Összes célpont:</strong> ${targets.length} db<br>
-            <strong>Szükséges ló a lefedéshez:</strong> <b style="color: #5b7e28; font-size: 18px;">${totalHorsesNeeded} db</b>
-        `;
         document.getElementById(`resultsSection_${i}`).style.display = 'block';
+        updateTotalSummary(i, targets.length);
+    }
+
+    function updateRowCalculation(tabIdx, rowIdx, distance) {
+        const useSzty = document.getElementById(`szty_${tabIdx}_${rowIdx}`).checked;
+        const useMest = document.getElementById(`mest_${tabIdx}_${rowIdx}`).checked;
+        const useMart = document.getElementById(`mart_${tabIdx}_${rowIdx}`).checked;
+
+        const timeCell = document.getElementById(`time_${tabIdx}_${rowIdx}`);
+        const horsesCell = document.getElementById(`horses_${tabIdx}_${rowIdx}`);
+
+        if (!useSzty && !useMest && !useMart) {
+            timeCell.innerText = 'Válassz egységet!';
+            horsesCell.innerText = '-';
+            updateTotalSummary(tabIdx);
+            return;
+        }
+
+        // Kiválasztott egységek sebességei közül a leglassabb meghatározása
+        let activeSpeeds = [];
+        if (useSzty) activeSpeeds.push(SPEEDS.sztyeppe);
+        if (useMest) activeSpeeds.push(SPEEDS.mesterlovesz);
+        if (useMart) activeSpeeds.push(SPEEDS.martaloc);
+
+        const slowestSpeed = Math.min(...activeSpeeds);
+        const travelTimeHours = distance / slowestSpeed;
+        const travelTimeMinutes = travelTimeHours * 60;
+        const roundTripMinutes = travelTimeMinutes * 2;
+        const horsesNeeded = Math.ceil(roundTripMinutes / parseFloat(document.getElementById(`interval_${tabIdx}`).value || 1));
+
+        timeCell.innerText = formatTime(roundTripMinutes);
+        
+        let horsesHtml = '';
+        if (useSzty) horsesHtml += `Sztyeppe: <b>${horsesNeeded}</b> db<br>`;
+        if (useMest) horsesHtml += `Mesterlövész: <b>${horsesNeeded}</b> db<br>`;
+        if (useMart) horsesHtml += `Martalóc: <b>${horsesNeeded}</b> db<br>`;
+        
+        horsesCell.innerHTML = horsesHtml;
+
+        updateTotalSummary(tabIdx);
+    }
+
+    function updateTotalSummary(tabIdx, totalTargetsCount) {
+        const tbody = document.getElementById(`resultsTableBody_${tabIdx}`);
+        if (!tbody) return;
+        
+        const rows = tbody.getElementsByTagName('tr');
+        let totalSzty = 0;
+        let totalMest = 0;
+        let totalMart = 0;
+        let activeRowsCount = 0;
+
+        for (let row of rows) {
+            const rId = row.id.split('_')[2];
+            const useSzty = document.getElementById(`szty_${tabIdx}_${rId}`).checked;
+            const useMest = document.getElementById(`mest_${tabIdx}_${rId}`).checked;
+            const useMart = document.getElementById(`mart_${tabIdx}_${rId}`).checked;
+
+            if (useSzty || useMest || useMart) {
+                activeRowsCount++;
+                const distance = parseFloat(document.getElementById(`dist_${tabIdx}_${rId}`).innerText);
+                
+                let activeSpeeds = [];
+                if (useSzty) activeSpeeds.push(SPEEDS.sztyeppe);
+                if (useMest) activeSpeeds.push(SPEEDS.mesterlovesz);
+                if (useMart) activeSpeeds.push(SPEEDS.martaloc);
+
+                const slowestSpeed = Math.min(...activeSpeeds);
+                const roundTripMinutes = (distance / slowestSpeed) * 60 * 2;
+                const horsesNeeded = Math.ceil(roundTripMinutes / parseFloat(document.getElementById(`interval_${tabIdx}`).value || 1));
+
+                if (useSzty) totalSzty += horsesNeeded;
+                if (useMest) totalMest += horsesNeeded;
+                if (useMart) totalMart += horsesNeeded;
+            }
+        }
+
+        const count = totalTargetsCount || rows.length;
+        let summaryHtml = `<strong>Összes célpont:</strong> ${count} db (Aktív: ${activeRowsCount} db)<br>`;
+        summaryHtml += `<strong>Szükséges egységek összesen (lefedéshez):</strong><br>`;
+        if (totalSzty > 0) summaryHtml += `- Sztyeppe: <b style="color: #5b7e28; font-size: 16px;">${totalSzty} db</b><br>`;
+        if (totalMest > 0) summaryHtml += `- Mesterlövész: <b style="color: #5b7e28; font-size: 16px;">${totalMest} db</b><br>`;
+        if (totalMart > 0) summaryHtml += `- Martalóc: <b style="color: #5b7e28; font-size: 16px;">${totalMart} db</b><br>`;
+        if (totalSzty === 0 && totalMest === 0 && totalMart === 0) summaryHtml += `<span style="color:red;">Nincs aktív egység kiválasztva.</span>`;
+
+        const summaryBox = document.getElementById(`summary_${tabIdx}`);
+        if (summaryBox) summaryBox.innerHTML = summaryHtml;
     }
 
     function formatTime(totalMinutes) {
