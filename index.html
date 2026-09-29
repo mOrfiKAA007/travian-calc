@@ -14,6 +14,16 @@
         .container { max-width: 950px; margin: 0 auto; background: #fff; padding: 15px 20px; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
         h1, h2 { color: #4a3828; border-bottom: 2px solid #7a6148; padding-bottom: 5px; font-size: 20px; }
         
+        /* Globális Összesítő Doboz a tetején */
+        .global-summary-container { background-color: #fdfbf7; border: 2px solid #7a6148; padding: 15px; border-radius: 6px; margin-bottom: 20px; }
+        .global-summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 10px; margin-top: 10px; }
+        .village-summary-card { background: #fff; border: 1px solid #dcd6cd; padding: 10px; border-radius: 5px; font-size: 13px; }
+        .village-summary-card h4 { margin: 0 0 6px 0; color: #4a3828; border-bottom: 1px solid #eee; padding-bottom: 3px; }
+        
+        .global-actions { margin-top: 12px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; }
+        button.global-calc-btn { background-color: #4a3828; color: white; padding: 10px 18px; border: none; border-radius: 4px; font-size: 14px; cursor: pointer; font-weight: bold; }
+        button.global-calc-btn:hover { background-color: #35271c; }
+
         /* Fülek stílusa */
         .tabs { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 15px; border-bottom: 2px solid #7a6148; padding-bottom: 8px; }
         .tab-btn { background-color: #dcd6cd; border: none; padding: 8px 14px; cursor: pointer; font-weight: bold; border-radius: 4px 4px 0 0; color: #4a3828; font-size: 14px; transition: background-color 0.2s; }
@@ -51,6 +61,18 @@
 <div class="container">
     <h1>Travian Oázis Farm Kalkulátor - by mOrfi <span id="syncStatus">Kapcsolódás...</span></h1>
     
+    <!-- Központi Összesítő a tetején -->
+    <div class="global-summary-container">
+        <h2>📊 Minden Falu Összesített Áttekintése</h2>
+        <div class="global-summary-grid" id="globalSummaryGrid">
+            <!-- Ide generálódnak a kártyák -->
+        </div>
+        <div class="global-actions">
+            <button class="global-calc-btn" onclick="calculateAllVillages()">🔄 Minden falu számítása / frissítése</button>
+            <span class="help-text">Itt látható az összes falu státusza anélkül, hogy váltogatnod kellene a füleket.</span>
+        </div>
+    </div>
+
     <!-- Fülek gombjai -->
     <div class="tabs" id="tabButtons">
         <button class="tab-btn active" onclick="switchTab(0)">1. Falu</button>
@@ -85,7 +107,7 @@
 
     const totalTabs = 7;
     let isRemoteUpdate = false; 
-    let globalAppData = []; // Itt tároljuk a betöltött adatokat (beleértve a pipákat is)
+    let globalAppData = []; 
 
     // Sebességek konstansai
     const SPEEDS = {
@@ -186,7 +208,6 @@
 
         const allData = [];
         for (let i = 0; i < totalTabs; i++) {
-            // Meglévő mentett pipák összegyűjtése ehhez a fülhöz, ha léteznek
             let unitsConfig = (globalAppData[i] && globalAppData[i].unitsConfig) ? globalAppData[i].unitsConfig : {};
 
             allData.push({
@@ -201,6 +222,7 @@
         globalAppData = allData;
         dbRef.set(allData).then(() => {
             document.getElementById('syncStatus').innerText = '🟢 Mentve';
+            updateGlobalSummaryCards();
         }).catch((error) => {
             document.getElementById('syncStatus').innerText = '🔴 Mentési hiba';
         });
@@ -215,13 +237,13 @@
                 if (data.interval !== undefined) document.getElementById(`interval_${i}`).value = data.interval;
                 if (data.targetCoords !== undefined) document.getElementById(`targetCoords_${i}`).value = data.targetCoords;
                 
-                // Ha már volt nyitva eredmény táblázat ezen a fülön, frissítsük automatikusan
                 const resultsSection = document.getElementById(`resultsSection_${i}`);
                 if (resultsSection && resultsSection.style.display !== 'none') {
                     calculate(i);
                 }
             }
         });
+        updateGlobalSummaryCards();
     }
 
     function calculate(i) {
@@ -246,7 +268,6 @@
 
         if (targets.length === 0) { alert('Nem található érvényes koordináta ezen a fülön!'); return; }
 
-        // Előző mentett pipák lekérése a Firebase adatból
         let savedUnitsConfig = (globalAppData[i] && globalAppData[i].unitsConfig) ? globalAppData[i].unitsConfig : {};
 
         const tbody = document.getElementById(`resultsTableBody_${i}`);
@@ -257,10 +278,8 @@
             const dy = startY - target.y;
             const distance = Math.sqrt(dx * dx + dy * dy);
 
-            // Kulcs az oázishoz (pl "41|-2")
             const coordKey = `${target.x}|${target.y}`;
             
-            // Alapértelmezés: ha még nincsen mentve semmi ehhez a koordinátához, az első (Sztyeppe) legyen igaz, a többi hamis
             let isSztyChecked = true;
             let isMestChecked = false;
             let isMartChecked = false;
@@ -295,10 +314,21 @@
 
         document.getElementById(`resultsSection_${i}`).style.display = 'block';
         updateTotalSummary(i, targets.length);
+        updateGlobalSummaryCards();
+    }
+
+    function calculateAllVillages() {
+        for (let i = 0; i < totalTabs; i++) {
+            const rawText = document.getElementById(`targetCoords_${i}`).value;
+            if (rawText && rawText.trim() !== '') {
+                calculate(i);
+            }
+        }
+        updateGlobalSummaryCards();
+        alert('Minden falu számítása frissítve!');
     }
 
     function onCheckboxChange(tabIdx, rowIdx, distance) {
-        // Amikor a felhasználó pipál, azonnal frissítjük a sor számítását és mentjük a Firebase-be is
         updateRowCalculation(tabIdx, rowIdx, distance, true);
     }
 
@@ -313,7 +343,6 @@
         const timeCell = document.getElementById(`time_${tabIdx}_${rowIdx}`);
         const horsesCell = document.getElementById(`horses_${tabIdx}_${rowIdx}`);
 
-        // Mentés frissítése a memóriában és Firebase-ben
         if (!globalAppData[tabIdx]) globalAppData[tabIdx] = {};
         if (!globalAppData[tabIdx].unitsConfig) globalAppData[tabIdx].unitsConfig = {};
         globalAppData[tabIdx].unitsConfig[coordKey] = { szty: useSzty, mest: useMest, mart: useMart };
@@ -326,6 +355,7 @@
             timeCell.innerText = 'Válassz egységet!';
             horsesCell.innerText = '-';
             updateTotalSummary(tabIdx);
+            updateGlobalSummaryCards();
             return;
         }
 
@@ -350,6 +380,7 @@
         horsesCell.innerHTML = horsesHtml;
 
         updateTotalSummary(tabIdx);
+        updateGlobalSummaryCards();
     }
 
     function updateTotalSummary(tabIdx, totalTargetsCount) {
@@ -396,7 +427,92 @@
         if (totalSzty === 0 && totalMest === 0 && totalMart === 0) summaryHtml += `<span style="color:red;">Nincs aktív egység kiválasztva.</span>`;
 
         const summaryBox = document.getElementById(`summary_${tabIdx}`);
-        if (summaryBox) summaryBox.html = summaryBox.innerHTML = summaryHtml; // Javítva
+        if (summaryBox) summaryBox.innerHTML = summaryHtml;
+    }
+
+    // Globális kártyák kirajzolása a tetejére
+    function updateGlobalSummaryCards() {
+        const grid = document.getElementById('globalSummaryGrid');
+        if (!grid) return;
+        grid.innerHTML = '';
+
+        for (let i = 0; i < totalTabs; i++) {
+            const startX = document.getElementById(`startX_${i}`) ? document.getElementById(`startX_${i}`).value : 0;
+            const startY = document.getElementById(`startY_${i}`) ? document.getElementById(`startY_${i}`).value : 0;
+            const rawText = document.getElementById(`targetCoords_${i}`) ? document.getElementById(`targetCoords_${i}`).value : '';
+            const intervalMin = parseFloat(document.getElementById(`interval_${i}`) ? document.getElementById(`interval_${i}`).value : 6) || 1;
+
+            const lines = rawText.split('\n');
+            const targets = [];
+            const coordRegex = /(-?\d+)[\s|,|\/]+(-?\d+)/;
+            for (let line of lines) {
+                line = line.trim();
+                if (!line) continue;
+                const match = line.match(coordRegex);
+                if (match) {
+                    targets.push({ x: parseFloat(match[1]), y: parseFloat(match[2]) });
+                }
+            }
+
+            if (targets.length === 0) {
+                continue; // Ha nincs oázis ezen a falun, ne mutassuk feleslegesen a kártyát
+            }
+
+            let savedUnitsConfig = (globalAppData[i] && globalAppData[i].unitsConfig) ? globalAppData[i].unitsConfig : {};
+            let totalSzty = 0;
+            let totalMest = 0;
+            let totalMart = 0;
+            let activeCount = 0;
+
+            targets.forEach(target => {
+                const coordKey = `${target.x}|${target.y}`;
+                let isSzty = true, isMest = false, isMart = false;
+
+                if (savedUnitsConfig[coordKey] !== undefined) {
+                    isSzty = !!savedUnitsConfig[coordKey].szty;
+                    isMest = !!savedUnitsConfig[coordKey].mest;
+                    isMart = !!savedUnitsConfig[coordKey].mart;
+                }
+
+                if (isSzty || isMest || isMart) {
+                    activeCount++;
+                    const dx = startX - target.x;
+                    const dy = startY - target.y;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+
+                    let activeSpeeds = [];
+                    if (isSzty) activeSpeeds.push(SPEEDS.sztyeppe);
+                    if (isMest) activeSpeeds.push(SPEEDS.mesterlovesz);
+                    if (isMart) activeSpeeds.push(SPEEDS.martaloc);
+
+                    const slowestSpeed = Math.min(...activeSpeeds);
+                    const roundTripMinutes = (distance / slowestSpeed) * 60 * 2;
+                    const horsesNeeded = Math.ceil(roundTripMinutes / intervalMin);
+
+                    if (isSzty) totalSzty += horsesNeeded;
+                    if (isMest) totalMest += horsesNeeded;
+                    if (isMart) totalMart += horsesNeeded;
+                }
+            });
+
+            const card = document.createElement('div');
+            card.className = 'village-summary-card';
+            card.innerHTML = `
+                <h4>${i + 1}. Falu (${startX}|${startY})</h4>
+                <div><strong>Oázisok száma:</strong> ${targets.length} db (Aktív: ${activeCount})</div>
+                <div style="margin-top: 4px;"><strong>Szükséges egységek:</strong></div>
+                ${totalSzty > 0 ? `<div>- Sztyeppe: <span style="color:#5b7e28; font-weight:bold;">${totalSzty} db</span></div>` : ''}
+                ${totalMest > 0 ? `<div>- Mesterlövész: <span style="color:#5b7e28; font-weight:bold;">${totalMest} db</span></div>` : ''}
+                ${totalMart > 0 ? `<div>- Martalóc: <span style="color:#5b7e28; font-weight:bold;">${totalMart} db</span></div>` : ''}
+                ${totalSzty === 0 && totalMest === 0 && totalMart === 0 ? '<div style="color:red;">Nincs aktív egység</div>' : ''}
+                <button style="margin-top: 6px; padding: 3px 8px; font-size: 11px; cursor: pointer;" onclick="switchTab(${i})">Ugrás a fülre ➡️</button>
+            `;
+            grid.appendChild(card);
+        }
+
+        if (grid.innerHTML === '') {
+            grid.innerHTML = '<div style="color: #666; font-style: italic; grid-column: 1 / -1;">Még nincsenek megadott oázisok egyik falunál sem.</div>';
+        }
     }
 
     function formatTime(totalMinutes) {
